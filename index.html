@@ -5,17 +5,47 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dino Dash</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #fff7ee; font-family: "Courier New", monospace; color: #7a3b00; }
+  html, body { margin: 0; min-height: 100%; background: #e6f4fb; font-family: "Courier New", monospace; color: #1f3b4d; }
   body { display: flex; flex-direction: column; align-items: center; justify-content: center; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+  body { padding: 20px 0; box-sizing: border-box; }
   h1 { font-size: 20px; letter-spacing: 3px; margin: 0 0 10px; color: #e8650a; }
-  canvas { width: min(900px, 96vw); height: auto; background: #fff3e2; border-radius: 10px; box-shadow: 0 4px 18px rgba(232,101,10,.15); display: block; }
+  .stage { position: relative; width: min(900px, 96vw); }
+  canvas { width: 100%; height: auto; background: linear-gradient(#bfe6fa, #e9f7fd); border-radius: 10px; box-shadow: 0 4px 18px rgba(31,59,77,.15); display: block; }
   p.help { font-size: 13px; opacity: .75; margin: 12px 0 0; text-align: center; padding: 0 12px; }
+  #entry { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(230,244,251,.85); border-radius: 10px; }
+  #entry form { background: #fff; padding: 18px 22px; border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,.12); text-align: center; }
+  #entry h2 { margin: 0 0 6px; font-size: 18px; color: #e8650a; }
+  #entry p { margin: 0 0 12px; font-size: 14px; }
+  #entry input { font: inherit; padding: 6px 10px; border: 2px solid #f07a1a; border-radius: 6px; width: 160px; text-transform: uppercase; }
+  #entry button, .board button { font: inherit; padding: 6px 14px; border: 0; border-radius: 6px; background: #f07a1a; color: #fff; cursor: pointer; margin-left: 6px; }
+  .board { width: min(420px, 92vw); margin-top: 18px; background: #fff; border-radius: 10px; box-shadow: 0 4px 14px rgba(31,59,77,.1); padding: 14px 18px; box-sizing: border-box; }
+  .board h2 { margin: 0 0 8px; font-size: 16px; letter-spacing: 2px; color: #e8650a; display: flex; justify-content: space-between; align-items: center; }
+  .board button { font-size: 11px; padding: 4px 8px; background: #8aa5b5; }
+  .board table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .board td { padding: 5px 4px; border-bottom: 1px dashed #d4e6ef; }
+  .board td:first-child { width: 30px; color: #8aa5b5; }
+  .board td:last-child { text-align: right; font-weight: bold; }
+  .board tr.new td { background: #fff1e3; }
+  .board .empty { text-align: center; opacity: .6; padding: 10px; }
 </style>
 </head>
 <body>
 <h1>DINO DASH</h1>
-<canvas id="c" width="900" height="260" aria-label="Endless runner game"></canvas>
+<div class="stage">
+  <canvas id="c" width="900" height="260" aria-label="Endless runner game"></canvas>
+  <div id="entry">
+    <form id="entryForm">
+      <h2>NEW HIGH SCORE!</h2>
+      <p>You scored <b id="entryScore">0</b>. Enter your name:</p>
+      <input id="entryName" maxlength="10" autocomplete="off" placeholder="YOUR NAME"><button type="submit">Save</button>
+    </form>
+  </div>
+</div>
 <p class="help">Space / ↑ / tap to jump &nbsp;·&nbsp; ↓ to duck &nbsp;·&nbsp; dodge the cacti and birds</p>
+<div class="board">
+  <h2>SCOREBOARD <button id="clearBoard" type="button">Clear</button></h2>
+  <table><tbody id="boardBody"></tbody></table>
+</div>
 <script>
 (() => {
   const cv = document.getElementById('c');
@@ -24,12 +54,49 @@
 
   const C = {
     dino: '#f07a1a', dinoDark: '#c45a08', belly: '#ffc48a', eye: '#3a1a00',
-    cactus: '#2f9e44', cactusDark: '#237a34', ground: '#d9822b', text: '#7a3b00',
-    cloud: '#ffe2c2', bird: '#a04a10', sun: '#ffd28a'
+    cactus: '#2f9e44', cactusDark: '#237a34', ground: '#c98a4b', text: '#1f3b4d',
+    cloud: '#ffffff', bird: '#5b4a8a', sun: '#ffe08a'
   };
 
-  let best = 0;
-  try { best = +localStorage.getItem('dinoDashBest') || 0; } catch (e) {}
+  // ---------- scoreboard ----------
+  const KEY = 'dinoDashBoard', MAX = 5;
+  let board = [];
+  try { board = JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) {}
+  let best = board.length ? board[0].score : 0;
+  let lastNew = -1;
+  const entry = document.getElementById('entry'), entryName = document.getElementById('entryName');
+
+  function saveBoard() { try { localStorage.setItem(KEY, JSON.stringify(board)); } catch (e) {} }
+  function esc(t) { return t.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function renderBoard() {
+    const body = document.getElementById('boardBody');
+    if (!board.length) { body.innerHTML = '<tr><td class="empty" colspan="3">No scores yet – go set one!</td></tr>'; return; }
+    body.innerHTML = board.map((r, i) =>
+      `<tr class="${i === lastNew ? 'new' : ''}"><td>${['🥇','🥈','🥉'][i] || i + 1}</td><td>${esc(r.name)}</td><td>${String(r.score).padStart(5, '0')}</td></tr>`).join('');
+  }
+  function qualifies(n) { return n > 0 && (board.length < MAX || n > board[board.length - 1].score); }
+  function askName(n) {
+    document.getElementById('entryScore').textContent = n;
+    entryName.value = (() => { try { return localStorage.getItem('dinoDashName') || ''; } catch (e) { return ''; } })();
+    entry.style.display = 'flex';
+    setTimeout(() => { entryName.focus(); entryName.select(); }, 30);
+  }
+  document.getElementById('entryForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const name = (entryName.value.trim() || 'PLAYER').toUpperCase().slice(0, 10);
+    try { localStorage.setItem('dinoDashName', name); } catch (e) {}
+    const rec = { name, score: pendingScore };
+    board.push(rec); board.sort((a, b) => b.score - a.score); board = board.slice(0, MAX);
+    lastNew = board.indexOf(rec); best = board[0].score;
+    saveBoard(); renderBoard();
+    entry.style.display = 'none'; entryName.blur();
+  });
+  document.getElementById('clearBoard').addEventListener('click', () => {
+    board = []; best = 0; lastNew = -1; saveBoard(); renderBoard();
+  });
+  let pendingScore = 0;
+  const typing = () => entry.style.display === 'flex';
+  renderBoard();
 
   let state, dino, obstacles, clouds, groundBits, speed, score, spawnIn, frame;
 
@@ -53,11 +120,12 @@
   }
 
   addEventListener('keydown', e => {
+    if (typing()) return;
     if (['Space', 'ArrowUp', 'KeyW'].includes(e.code)) { e.preventDefault(); jump(); }
     if (['ArrowDown', 'KeyS'].includes(e.code)) { e.preventDefault(); duck(true); }
   });
   addEventListener('keyup', e => { if (['ArrowDown', 'KeyS'].includes(e.code)) duck(false); });
-  cv.addEventListener('pointerdown', e => { e.preventDefault(); jump(); });
+  cv.addEventListener('pointerdown', e => { if (typing()) return; e.preventDefault(); jump(); });
 
   function spawn() {
     const r = Math.random();
@@ -102,8 +170,9 @@
     for (const o of obstacles) {
       if (hit(box, o)) {
         state = 'over';
-        best = Math.max(best, Math.floor(score));
-        try { localStorage.setItem('dinoDashBest', best); } catch (e) {}
+        pendingScore = Math.floor(score);
+        lastNew = -1;
+        if (qualifies(pendingScore)) askName(pendingScore); else renderBoard();
         break;
       }
     }
