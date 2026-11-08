@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dino Dash</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #fff7ee; font-family: "Courier New", monospace; color: #7a3b00; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+  h1 { font-size: 20px; letter-spacing: 3px; margin: 0 0 10px; color: #e8650a; }
+  canvas { width: min(900px, 96vw); height: auto; background: #fff3e2; border-radius: 10px; box-shadow: 0 4px 18px rgba(232,101,10,.15); display: block; }
+  p.help { font-size: 13px; opacity: .75; margin: 12px 0 0; text-align: center; padding: 0 12px; }
+</style>
+</head>
+<body>
+<h1>DINO DASH</h1>
+<canvas id="c" width="900" height="260" aria-label="Endless runner game"></canvas>
+<p class="help">Space / ↑ / tap to jump &nbsp;·&nbsp; ↓ to duck &nbsp;·&nbsp; dodge the cacti and birds</p>
+<script>
+(() => {
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height, GROUND = 220;
+
+  const C = {
+    dino: '#f07a1a', dinoDark: '#c45a08', belly: '#ffc48a', eye: '#3a1a00',
+    cactus: '#2f9e44', cactusDark: '#237a34', ground: '#d9822b', text: '#7a3b00',
+    cloud: '#ffe2c2', bird: '#a04a10', sun: '#ffd28a'
+  };
+
+  let best = 0;
+  try { best = +localStorage.getItem('dinoDashBest') || 0; } catch (e) {}
+
+  let state, dino, obstacles, clouds, groundBits, speed, score, spawnIn, frame;
+
+  function reset() {
+    state = 'ready';
+    dino = { x: 60, y: GROUND, vy: 0, w: 44, h: 48, ducking: false, onGround: true };
+    obstacles = []; speed = 6; score = 0; spawnIn = 60; frame = 0;
+    clouds = Array.from({length: 4}, (_, i) => ({ x: 150 + i * 230, y: 40 + Math.random() * 60 }));
+    groundBits = Array.from({length: 40}, () => ({ x: Math.random() * W, y: GROUND + 6 + Math.random() * 18, w: 2 + Math.random() * 6 }));
+  }
+
+  function jump() {
+    if (state === 'ready') { state = 'play'; }
+    if (state === 'over') { reset(); state = 'play'; return; }
+    if (dino.onGround && !dino.ducking) { dino.vy = -13.5; dino.onGround = false; }
+  }
+  function duck(on) {
+    if (state !== 'play') return;
+    dino.ducking = on;
+    if (on && !dino.onGround) dino.vy += 4; // fast drop
+  }
+
+  addEventListener('keydown', e => {
+    if (['Space', 'ArrowUp', 'KeyW'].includes(e.code)) { e.preventDefault(); jump(); }
+    if (['ArrowDown', 'KeyS'].includes(e.code)) { e.preventDefault(); duck(true); }
+  });
+  addEventListener('keyup', e => { if (['ArrowDown', 'KeyS'].includes(e.code)) duck(false); });
+  cv.addEventListener('pointerdown', e => { e.preventDefault(); jump(); });
+
+  function spawn() {
+    const r = Math.random();
+    if (score > 300 && r < 0.22) {
+      const heights = [GROUND - 30, GROUND - 62, GROUND - 92];
+      obstacles.push({ type: 'bird', x: W + 20, y: heights[Math.floor(Math.random() * 3)], w: 40, h: 26 });
+    } else {
+      const count = r < 0.55 ? 1 : r < 0.85 ? 2 : 3;
+      const big = Math.random() < 0.4;
+      const cw = big ? 26 : 18, ch = big ? 50 : 36;
+      obstacles.push({ type: 'cactus', x: W + 20, y: GROUND - ch, w: cw * count + (count - 1) * 4, h: ch, count, cw });
+    }
+    const gap = 70 + Math.random() * 70;
+    spawnIn = Math.max(38, gap - speed * 2);
+  }
+
+  function hit(a, b) {
+    const pad = 6;
+    return a.x + pad < b.x + b.w && a.x + a.w - pad > b.x && a.y + pad < b.y + b.h && a.y + a.h - pad > b.y;
+  }
+
+  function update() {
+    frame++;
+    if (state !== 'play') return;
+    speed = Math.min(16, 6 + score / 400);
+    score += speed * 0.08;
+
+    dino.vy += 0.8;
+    dino.y += dino.vy;
+    if (dino.y >= GROUND) { dino.y = GROUND; dino.vy = 0; dino.onGround = true; }
+    dino.h = dino.ducking && dino.onGround ? 30 : 48;
+    dino.w = dino.ducking && dino.onGround ? 58 : 44;
+
+    if (--spawnIn <= 0) spawn();
+    obstacles.forEach(o => o.x -= speed * (o.type === 'bird' ? 1.1 : 1));
+    obstacles = obstacles.filter(o => o.x + o.w > -10);
+
+    clouds.forEach(c => { c.x -= speed * 0.2; if (c.x < -80) { c.x = W + 40; c.y = 30 + Math.random() * 70; } });
+    groundBits.forEach(g => { g.x -= speed; if (g.x < -10) { g.x = W + Math.random() * 40; } });
+
+    const box = { x: dino.x, y: dino.y - dino.h, w: dino.w, h: dino.h };
+    for (const o of obstacles) {
+      if (hit(box, o)) {
+        state = 'over';
+        best = Math.max(best, Math.floor(score));
+        try { localStorage.setItem('dinoDashBest', best); } catch (e) {}
+        break;
+      }
+    }
+  }
+
+  // ---------- drawing ----------
+  function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill(); }
+
+  function drawDino() {
+    const x = dino.x, base = dino.y;
+    const running = state === 'play' && dino.onGround;
+    const step = running ? Math.floor(frame / 6) % 2 : 0;
+    ctx.save();
+    if (dino.ducking && dino.onGround) {
+      // long low body
+      ctx.fillStyle = C.dino; rr(x, base - 28, 46, 22, 11);
+      ctx.fillStyle = C.belly; rr(x + 8, base - 14, 30, 8, 4);
+      ctx.fillStyle = C.dino; rr(x + 36, base - 30, 24, 18, 9); // head
+      ctx.fillStyle = C.eye; ctx.beginPath(); ctx.arc(x + 51, base - 23, 2.6, 0, 7); ctx.fill();
+      ctx.fillStyle = C.dinoDark;
+      ctx.beginPath(); ctx.moveTo(x, base - 22); ctx.lineTo(x - 14, base - 18); ctx.lineTo(x, base - 13); ctx.fill();
+      rr(x + 10 + (step ? 4 : 0), base - 8, 7, 8, 3); rr(x + 28 - (step ? 4 : 0), base - 8, 7, 8, 3);
+    } else {
+      // tail
+      ctx.fillStyle = C.dinoDark;
+      ctx.beginPath(); ctx.moveTo(x + 6, base - 30); ctx.quadraticCurveTo(x - 16, base - 26, x - 12, base - 14); ctx.lineTo(x + 8, base - 20); ctx.fill();
+      // body
+      ctx.fillStyle = C.dino; rr(x, base - 40, 32, 32, 14);
+      ctx.fillStyle = C.belly; rr(x + 10, base - 30, 16, 18, 8);
+      // neck + round head
+      ctx.fillStyle = C.dino; rr(x + 18, base - 52, 14, 20, 6);
+      rr(x + 18, base - 62, 28, 22, 11);
+      // spikes on back
+      ctx.fillStyle = C.dinoDark;
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(x + 4 + i * 7, base - 38 + i * -2); ctx.lineTo(x + 8 + i * 7, base - 46 - i * 2); ctx.lineTo(x + 12 + i * 7, base - 38 - i * 2); ctx.fill(); }
+      // eye + cheek
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 36, base - 53, 4.5, 0, 7); ctx.fill();
+      ctx.fillStyle = C.eye; ctx.beginPath(); ctx.arc(state === 'over' ? x + 36 : x + 37, base - 53, 2.4, 0, 7); ctx.fill();
+      ctx.fillStyle = '#ff9d5c'; ctx.beginPath(); ctx.arc(x + 40, base - 45, 3, 0, 7); ctx.fill();
+      // little arm
+      ctx.fillStyle = C.dinoDark; rr(x + 28, base - 30, 9, 5, 2.5);
+      // legs
+      if (!dino.onGround) { rr(x + 6, base - 10, 8, 10, 3); rr(x + 20, base - 10, 8, 10, 3); }
+      else { rr(x + 6, base - 10 + (step ? -3 : 0), 8, step ? 7 : 10, 3); rr(x + 20, base - 10 + (step ? 0 : -3), 8, step ? 10 : 7, 3); }
+    }
+    ctx.restore();
+  }
+
+  function drawCactus(cx, top, w, h) {
+    ctx.fillStyle = C.cactus;
+    const stem = w * 0.42, sx = cx + (w - stem) / 2;
+    rr(sx, top, stem, h, stem / 2);
+    // arms
+    rr(cx, top + h * 0.35, stem * 0.75, h * 0.32, 4);
+    rr(cx, top + h * 0.55, sx - cx + 2, stem * 0.45, 3);
+    rr(sx + stem - stem * 0.75 + w * 0.29, top + h * 0.2, stem * 0.75, h * 0.3, 4);
+    rr(sx + stem - 2, top + h * 0.42, w - (sx + stem - cx) + 2, stem * 0.45, 3);
+    ctx.fillStyle = C.cactusDark;
+    rr(sx + stem * 0.4, top + 4, 2, h - 8, 1);
+  }
+
+  function drawBird(o) {
+    const flap = Math.floor(frame / 10) % 2;
+    ctx.fillStyle = C.bird;
+    rr(o.x + 8, o.y + 10, 26, 10, 5);
+    ctx.beginPath(); ctx.moveTo(o.x + 8, o.y + 14); ctx.lineTo(o.x - 2, o.y + 16); ctx.lineTo(o.x + 8, o.y + 18); ctx.fill();
+    ctx.beginPath();
+    if (flap) { ctx.moveTo(o.x + 14, o.y + 12); ctx.lineTo(o.x + 22, o.y - 2); ctx.lineTo(o.x + 28, o.y + 12); }
+    else { ctx.moveTo(o.x + 14, o.y + 18); ctx.lineTo(o.x + 22, o.y + 30); ctx.lineTo(o.x + 28, o.y + 18); }
+    ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(o.x + 12, o.y + 13, 1.6, 0, 7); ctx.fill();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // sun
+    ctx.fillStyle = C.sun; ctx.beginPath(); ctx.arc(W - 90, 55, 28, 0, 7); ctx.fill();
+    // clouds
+    ctx.fillStyle = C.cloud;
+    clouds.forEach(c => { rr(c.x, c.y, 60, 16, 8); rr(c.x + 14, c.y - 9, 30, 16, 8); });
+    // ground
+    ctx.fillStyle = C.ground; ctx.fillRect(0, GROUND, W, 2);
+    groundBits.forEach(g => ctx.fillRect(g.x, g.y, g.w, 2));
+
+    obstacles.forEach(o => {
+      if (o.type === 'cactus') for (let i = 0; i < o.count; i++) drawCactus(o.x + i * (o.cw + 4), o.y, o.cw, o.h);
+      else drawBird(o);
+    });
+    drawDino();
+
+    // score
+    ctx.fillStyle = C.text; ctx.font = 'bold 16px Courier New'; ctx.textAlign = 'right';
+    const pad = n => String(Math.floor(n)).padStart(5, '0');
+    ctx.fillText(`HI ${pad(best)}   ${pad(score)}`, W - 20, 28);
+
+    ctx.textAlign = 'center';
+    if (state === 'ready') {
+      ctx.font = 'bold 20px Courier New'; ctx.fillText('PRESS SPACE OR TAP TO START', W / 2, 110);
+    } else if (state === 'over') {
+      ctx.font = 'bold 26px Courier New'; ctx.fillText('G A M E   O V E R', W / 2, 95);
+      ctx.font = '15px Courier New'; ctx.fillText('Space or tap to play again', W / 2, 125);
+    }
+  }
+
+  function loop() { update(); draw(); requestAnimationFrame(loop); }
+  reset(); loop();
+})();
+</script>
+</body>
+</html>
